@@ -34,6 +34,8 @@ fn main() -> Result<()> {
 	chroot(tmp_dir.path()).context("failed to chroot")?;
 	env::set_current_dir("/").context("failed to set cur dir to /")?;	
 
+//	unsafe {libc::unshare(libc::CLONE_NEWPID)}
+
     let output = std::process::Command::new(command.split("/").last().unwrap())
         .args(command_args)
         .output()
