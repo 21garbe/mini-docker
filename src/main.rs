@@ -18,17 +18,15 @@ fn main() -> Result<()> {
     let command = &args[3];
     let command_args = &args[4..];
 
-	let tmp_dir = TempDir::new()?;
-	let dst = tmp_dir
-		.path()
-		.join(command.strip_prefix("/").unwrap_or(command));
 
+	let tmp_dir = TempDir::new()?;
 	create_dir_all(tmp_dir.path().join("dev/null"))
 		.context("failed in creating null device")?;
-	create_dir_all(dst.parent().unwrap())
-		.context("failed to creating parent dir of command")?;
+	let dst = tmp_dir
+		.path()
+		.join(command.split("/").last().unwrap());
 
-// 	println!("the new location of the command is \n:{}", dst.to_string_lossy().to_string());
+	println!("the new location of the command is \n:{}", dst.to_string_lossy().to_string());
 
 	let resolved = resolve_name(command).context("failed to resolving name of command")?;
 	copy(resolved, dst).context("failed to copy")?;	
@@ -36,7 +34,7 @@ fn main() -> Result<()> {
 	chroot(tmp_dir.path()).context("failed to chroot")?;
 	env::set_current_dir("/").context("failed to set cur dir to /")?;	
 
-    let output = std::process::Command::new(command)
+    let output = std::process::Command::new(command.split("/").last().unwrap())
         .args(command_args)
         .output()
         .with_context(|| {
