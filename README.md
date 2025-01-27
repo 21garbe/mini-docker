@@ -1,2 +1,3 @@
 # mini-docker
-Mini docker project
+This project aims at creating a toy docker project for third year in school
+
