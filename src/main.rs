@@ -115,7 +115,7 @@ async fn get_token(client: &reqwest::Client, image: &str) -> Result<String> {
 	Ok(res_json.token)	
 }
 
-async fn get_manifest(client: &reqwest::Client, token: &str, image: &str) -> Result<()> {
+async fn get_manifest(client: &reqwest::Client, token: &str, image: &str) -> Result<Value> {
 	let manifest_request = format!(
 		"https://registry.hub.docker.com/v2/library/{}/manifests/latest",
 		image,
@@ -129,7 +129,7 @@ async fn get_manifest(client: &reqwest::Client, token: &str, image: &str) -> Res
 		.context("failed fetching the manifest")?;
 
 	let manifest_json: Value = manifest.json().await?;
-	let prettylayer = serde_json::to_string_pretty(&manifest_json)?;
+//	let prettylayer = serde_json::to_string_pretty(&manifest_json)?;
 //	println!("the manifest layer: {}", prettylayer);
 
 	if let Some(manifests) = manifest_json.get("manifests") {
@@ -145,12 +145,15 @@ async fn get_manifest(client: &reqwest::Client, token: &str, image: &str) -> Res
 			.context("failed fetching the specific manifest")?;
 
 		let specific_json: Value = specific_manifest.json().await?;
+
+		return Ok(specific_json);
 		let prettylayer2 = serde_json::to_string_pretty(&specific_json)?; 	
 		println!("here is the specific manifest {}", prettylayer2);
 
+	} else {
+		return Ok(manifest_json);
 	}	
-
-	Ok(())	
+	Err(anyhow!("error getting the manifest"))
 }
 
 async fn get_digest(manifests: &Value) -> Result<&str> {
@@ -179,7 +182,10 @@ async fn get_digest(manifests: &Value) -> Result<&str> {
 async fn main() -> Result<()> {
 	let client = reqwest::Client::new();
 	let token: String = get_token(&client, "alpine").await?;
-	get_manifest(&client, &token, "alpine").await?;
+	let manifest: Value = get_manifest(&client, &token, "alpine").await?;
+
+	let prettylayer = serde_json::to_string_pretty(&manifest)?; 	
+	println!("here is the specific manifest {}", prettylayer);
 //	println!("The response token is {}", token);
  	Ok(())
 }
