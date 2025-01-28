@@ -88,14 +88,9 @@ use serde::Deserialize;
 // }
 
 #[derive(Deserialize)]
-struct token_resp {
+struct TokenResp {
 	token: String,
 }
-
-// #[derive(Deserialize)]
-// struct manifest_resp {
-// 	layers: String, 
-// }
 
 async fn get_token(client: &reqwest::Client, image: &str) -> Result<String> {
 //	let client = reqwest::Client::new();
@@ -110,7 +105,7 @@ async fn get_token(client: &reqwest::Client, image: &str) -> Result<String> {
 		.await
 		.context("failed fetching the token")?;
 
-	let res_json: token_resp = response.json().await?;
+	let res_json: TokenResp = response.json().await?;
 
 	Ok(res_json.token)	
 }
@@ -176,16 +171,65 @@ async fn get_digest(manifests: &Value) -> Result<&str> {
 		Err(anyhow!("couldn't get the digest"))
 	}
 }
+async fn pull_layers(manifest: Value, client: &reqwest::Client, token: &str, image: &str) -> Result<()> {	
+	let layers = manifest["layers"]
+		.as_array()
+		.context("not any layers in that manifest")?;
+	// Iterate over each layer and download it
+    for layer in layers {
+        let digest = layer["digest"]
+            .as_str()
+            .context("Layer does not contain a digest")?;
 
+        println!("Downloading layer: {}", digest);
+
+        // Construct the blob URL
+        let blob_url = format!(
+            "https://registry.hub.docker.com/v2/library/{}/blobs/{}",
+            image, digest
+        );
+
+        // Download the blob
+        let response = client
+            .get(&blob_url)
+            .header("Authorization", format!("Bearer {}", token))
+            .send()
+            .await
+            .context("Failed to fetch the blob")?;
+
+        if !response.status().is_success() {
+            return Err(anyhow::anyhow!(
+                "Failed to download layer {}: {}",
+                digest,
+                response.status()
+            ));
+        }
+
+        // Save the blob data
+        let blob_data = response.bytes().await?;
+        let filename = format!("{}.tar", digest.replace(":", "_"));
+        tokio::fs::write(&filename, &blob_data)
+            .await
+            .context("Failed to save the blob to disk")?;
+
+        println!("Layer saved to {}", filename);
+    }
+
+    Ok(())
+} 
 
 #[tokio::main]
 async fn main() -> Result<()> {
 	let client = reqwest::Client::new();
 	let token: String = get_token(&client, "alpine").await?;
 	let manifest: Value = get_manifest(&client, &token, "alpine").await?;
+	pull_layers(manifest, &client, &token, "alpine")
+		.await	
+		.context("couldn't pull the layers")?;
+//	println!("first layer{}", layers[0].to_string());
 
-	let prettylayer = serde_json::to_string_pretty(&manifest)?; 	
-	println!("here is the specific manifest {}", prettylayer);
+//	let prettylayer = serde_json::to_string_pretty(&manifest)?; 	
+//	println!("here is the specific manifest {}", prettylayer);
 //	println!("The response token is {}", token);
  	Ok(())
 }
