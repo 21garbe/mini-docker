@@ -88,32 +88,87 @@ use serde::Deserialize;
 // }
 
 #[derive(Deserialize)]
-struct Response {
+struct token_resp {
 	token: String,
 }
 
-async fn pull_image(image: &str) -> Result<()> {
-	let client = reqwest::Client::new();
+// #[derive(Deserialize)]
+// struct manifest_resp {
+// 	layers: String, 
+// }
 
-	let auth_data = json!({
-			"username": "maheron",
-			"password": "fokXun-5vubhy-migwyq"	
-	});
+async fn get_token(client: &reqwest::Client, image: &str) -> Result<String> {
+//	let client = reqwest::Client::new();
 
-	let response = client.post("https://hub.docker.com/v2/users/login")
-		.header("Content-Type", "application/json")
-		.body(auth_data.to_string())
+	let token_request = format!(
+		 "https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/{}:pull",
+		 image);
+
+	let response = client
+		.get(token_request)
 		.send()
-		.await?;
+		.await
+		.context("failed fetching the token")?;
 
-	let res_json: Response = response.json().await?;
+	let res_json: token_resp = response.json().await?;
 
-	println!("The response token is {}", res_json.token);
+	Ok(res_json.token)	
+}
+
+async fn get_manifest(client: &reqwest::Client, token: &str, image: &str) -> Result<()> {
+	let manifest_request = format!(
+		"https://registry.hub.docker.com/v2/library/{}/manifests/latest",
+		image,
+	);
+
+	let manifest = client.get(manifest_request)
+		.header("Accept", "application/vnd.docker.distribution.manifest.v2+json")
+		.header("Authorization", format!("Bearer {}", token))
+		.send()
+		.await
+		.context("failed fetching the manifest")?;
+
+	let manifest_json: Value = manifest.json().await?;
+	let prettylayer = serde_json::to_string_pretty(&manifest_json)?;
+//	println!("the manifest layer: {}", prettylayer);
+
+	if let Some(manifests) = manifest_json.get("manifests") {
+//		let digest = get_digest(manifests).await?;
+//		println!("here is the digest {}", digest);
+		get_digest(manifests).await?;
+	}	
+
 	Ok(())	
 }
 
+async fn get_digest(manifests: &Value) -> Result<()> {
+	// Sélectionne un manifest spécifique (exemple : amd64)
+	if let Some(selected_manifest) = manifests.as_array().and_then(|m| {
+	    m.iter().find(|manifest| {
+	        manifest
+	            .get("platform")
+	            .and_then(|platform| platform.get("architecture"))
+	            == Some(&Value::String("amd64".to_string()))
+	    })
+	}) {
+	    let digest = selected_manifest
+	        .get("digest")
+	        .and_then(Value::as_str)
+	        .context("No digest found for selected manifest")?;
+	
+	    println!("Selected digest: {}", digest);
+		Ok(())
+	} else {
+		Err(anyhow!("help"))
+	}
+}
+
+
 #[tokio::main]
 async fn main() -> Result<()> {
-	pull_image("alpine").await?;
+	let client = reqwest::Client::new();
+	let token: String = get_token(&client, "alpine").await?;
+	get_manifest(&client, &token, "alpine").await?;
+//	println!("The response token is {}", token);
  	Ok(())
 }
