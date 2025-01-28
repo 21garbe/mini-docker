@@ -133,15 +133,27 @@ async fn get_manifest(client: &reqwest::Client, token: &str, image: &str) -> Res
 //	println!("the manifest layer: {}", prettylayer);
 
 	if let Some(manifests) = manifest_json.get("manifests") {
-//		let digest = get_digest(manifests).await?;
-//		println!("here is the digest {}", digest);
-		get_digest(manifests).await?;
+		let digest = get_digest(manifests).await?;
+		let spec_manifest_url = format!(
+			"https://registry.hub.docker.com/v2/library/{}/manifests/{}",
+			image, digest); 
+		let specific_manifest = client.get(&spec_manifest_url)
+			.header("Accept", "application/vnd.docker.distribution.manifest.v2+json")
+			.header("Authorization", format!("Bearer {}", token))
+			.send()
+			.await
+			.context("failed fetching the specific manifest")?;
+
+		let specific_json: Value = specific_manifest.json().await?;
+		let prettylayer2 = serde_json::to_string_pretty(&specific_json)?; 	
+		println!("here is the specific manifest {}", prettylayer2);
+
 	}	
 
 	Ok(())	
 }
 
-async fn get_digest(manifests: &Value) -> Result<()> {
+async fn get_digest(manifests: &Value) -> Result<&str> {
 	// Sélectionne un manifest spécifique (exemple : amd64)
 	if let Some(selected_manifest) = manifests.as_array().and_then(|m| {
 	    m.iter().find(|manifest| {
@@ -156,10 +168,9 @@ async fn get_digest(manifests: &Value) -> Result<()> {
 	        .and_then(Value::as_str)
 	        .context("No digest found for selected manifest")?;
 	
-	    println!("Selected digest: {}", digest);
-		Ok(())
+		Ok(digest)
 	} else {
-		Err(anyhow!("help"))
+		Err(anyhow!("couldn't get the digest"))
 	}
 }
 
