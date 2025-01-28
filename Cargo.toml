@@ -17,3 +17,4 @@ regex = "1"                                                        # for regular
 flate2 = "1.0.25"                                                  # for handling compressed data
 tar = "0.4.38"
 nix = "0.23"
+libflate = "2.1.0"
