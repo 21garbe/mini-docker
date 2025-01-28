@@ -4,9 +4,16 @@ use std::os::unix::fs::chroot;
 use tempfile::TempDir;
 use std::path::Path;
 use nix::sys::stat::{mknod, Mode, SFlag};
+use reqwest::Error;
+use serde_json::json;
+use serde_json::Value; // For JSON parsing
+use tokio; // Needed for async runtime
+
+
 
 // Usage: your_docker.sh run <image> <command> <arg1> <arg2> ...
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().collect();
     
     // file system isolation
@@ -34,6 +41,64 @@ fn main() -> Result<()> {
     chroot("/")?;
     //chroot(tmp_dir.path())?;
     std::env::set_current_dir("/")?;
+
+    let client = reqwest::Client::new();
+    // let request_url = "https://hub.docker.com/v2/users/login/";
+    // println!("{}", request_url);
+    
+    // let payload = json!({
+    //     "username": "martin389",
+    //     "password": "sTUJ*pT68eKFTF8"
+    // });
+    // let response = client
+    //     .post(request_url)
+    //     .header("Content-Type", "application/json")
+    //     .body(payload.to_string())
+    //     .send()
+    //     .await?;
+
+    let url = "https://auth.docker.io/token?scope=repository:library/alpine:pull&service=registry.docker.io";
+    let response = client
+    .get(url)
+    .send()
+    .await?;
+
+    println!("Response status: {}", response.status());
+    let response_json: Value = response.json().await?;
+
+    // Extract the token from the JSON response
+    if let Some(token) = response_json.get("token").and_then(|t| t.as_str()) {
+        println!("Token: {}", token);
+        let request_url_image = format!("https://registry.hub.docker.com/v2/library/{}/manifests/{}", "alpine", "latest");
+        println!("{}", request_url_image);
+        let response = client
+            .get(request_url_image)
+            .header("Authorization", format!("Bearer {}", token))
+            .header("Accept","application/vnd.docker.distribution.manifest.v2+json")
+            .send()
+            .await?;
+
+        if response.status().is_success() {
+            let manifest: Value = response.json().await?;
+            println!("Image Manifest: {:#?}", manifest);
+
+            // Extract layer digests from the manifest
+            if let Some(layers) = manifest["layers"].as_array() {
+                for layer in layers {
+                    if let Some(digest) = layer["digest"].as_str() {
+                        println!("Layer Digest: {}", digest);
+                    }
+                }
+            }
+        } else {
+            println!("Failed to fetch manifest: {}", response.status());
+        }
+
+    } else {
+        println!("No token found in response.");
+    }
+
+    
 
     
 
