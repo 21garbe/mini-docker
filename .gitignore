@@ -1,2 +1,5 @@
 /target
 /Cargo.lock
+/chroottest
+*.tar
+.DS_Store
