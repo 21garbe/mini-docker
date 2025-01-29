@@ -1,18 +1,19 @@
 use anyhow::{Context, Result, anyhow};
-// use std::fs::{copy, create_dir_all};
-// use std::os::unix::fs::chroot;
-// use tempfile::TempDir;
-// use std::path::Path;
-// use std::env;
+use std::fs::{copy, create_dir_all, remove_file};
+use std::os::unix::fs::chroot;
+use tempfile::TempDir;
+use std::path::Path;
+use std::env;
 use serde_json::{Value, json};
 use futures::executor::block_on;
 use serde::Deserialize;
 
 
 // Usage: your_docker.sh run <image> <command> <arg1> <arg2> ...
+// #[tokio::main]
 // fn main() -> Result<()> {
 //     let args: Vec<_> = std::env::args().collect();
-//     // let image = &args[2]; 
+//     let image = &args[2]; 
 // 
 //     // here must create a temp dir and put the command in it
 //     // then call chroot to this temp dir and then execute the 
@@ -21,19 +22,32 @@ use serde::Deserialize;
 //     let command = &args[3];
 //     let command_args = &args[4..];
 // 
-// 
+// 	// creating temp dir 
 // 	let tmp_dir = TempDir::new()?;
 // 	create_dir_all(tmp_dir.path().join("dev/null"))
 // 		.context("failed in creating null device")?;
+// 	
+// 	// pulling layers
+// 	let client = reqwest::Client::new();
+// 	let token: String = get_token(&client, "alpine").await?;
+// 	let manifest: Value = get_manifest(&client, &token, "alpine").await?;
+// 	pull_layers(manifest, &client, &token, "alpine")
+// 		.await	
+// 		.context("couldn't pull the layers")?;
+// 
+// 
+// 	// nedd to unzip the layers to the temp dir to make it functional
+// 
+// 	// moving command into temp dir
 // 	let dst = tmp_dir
 // 		.path()
 // 		.join(command.split("/").last().unwrap());
-// 
 // 	println!("the new location of the command is \n:{}", dst.to_string_lossy().to_string());
 // 
 // 	let resolved = resolve_name(command).context("failed to resolving name of command")?;
 // 	copy(resolved, dst).context("failed to copy")?;	
 // 
+// 	// trying to chroot
 // 	chroot(tmp_dir.path()).context("failed to chroot")?;
 // 	env::set_current_dir("/").context("failed to set cur dir to /")?;	
 // 
@@ -171,7 +185,7 @@ async fn get_digest(manifests: &Value) -> Result<&str> {
 		Err(anyhow!("couldn't get the digest"))
 	}
 }
-async fn pull_layers(manifest: Value, client: &reqwest::Client, token: &str, image: &str) -> Result<()> {	
+async fn pull_layers(manifest: Value, client: &reqwest::Client, token: &str, image: &str, fsdir: &str) -> Result<()> {	
 	let layers = manifest["layers"]
 		.as_array()
 		.context("not any layers in that manifest")?;
@@ -207,14 +221,31 @@ async fn pull_layers(manifest: Value, client: &reqwest::Client, token: &str, ima
 
         // Save the blob data
         let blob_data = response.bytes().await?;
-        let filename = format!("{}.tar", digest.replace(":", "_"));
+        let filename = format!("{}/{}.tar", fsdir, digest.replace(":", "_"));
         tokio::fs::write(&filename, &blob_data)
             .await
             .context("Failed to save the blob to disk")?;
 
-        println!("Layer saved to {}", filename);
-    }
+        println!("Layer saved to {}", &filename);
 
+		// untar the file in the same location
+		let command_args: [&str; 4] = ["-xpf", &filename, "-C", &fsdir];
+   		let output = std::process::Command::new("tar")
+   		    .args(command_args)
+   		    .output()
+   		    .with_context(|| {
+   		        format!(
+   		            "Tried to run 'tar' with arguments {:?}",
+   		            command_args
+   		        )
+   		    })?;
+		if !output.status.success() {
+			return Err(anyhow!("couldn't untar the file with tar"));
+		} else {
+			remove_file(&filename)?;
+		}
+		
+	}
     Ok(())
 } 
 
@@ -223,7 +254,7 @@ async fn main() -> Result<()> {
 	let client = reqwest::Client::new();
 	let token: String = get_token(&client, "alpine").await?;
 	let manifest: Value = get_manifest(&client, &token, "alpine").await?;
-	pull_layers(manifest, &client, &token, "alpine")
+	pull_layers(manifest, &client, &token, "alpine", "./chroottest")
 		.await	
 		.context("couldn't pull the layers")?;
 //	println!("first layer{}", layers[0].to_string());
