@@ -1,9 +1,12 @@
 use anyhow::{Context, Result};
+use libc::IFLA_TARGET_NETNSID;
+use libc::NLM_F_ROOT;
 use std::env;
 use std::fs;
 use std::fs::create_dir_all;
 use std::fs::File;
 use std::os::unix::fs::chroot;
+use std::ffi::CString;
 use tempfile::TempDir;
 use std::path::Path;
 use nix::sys::stat::{mknod, Mode, SFlag};
@@ -198,6 +201,25 @@ fn update_path() {
     // Set the updated PATH
     env::set_var("PATH", new_path);
 }
+fn check_ls_in_chroot() -> io::Result<()> {
+    // Try to open /bin/ls
+    let file_path = "/bin/ls";
+    match File::open(file_path) {
+        Ok(mut file) => {
+            println!("Successfully opened: {}", file_path);
+            
+            // Read the first few bytes to ensure the file is valid
+            let mut buffer = [0u8; 10]; // Read first 10 bytes
+            file.read_exact(&mut buffer)?;
+            println!("First 10 bytes: {:?}", buffer);
+        }
+        Err(e) => {
+            println!("Failed to open {}: {}", file_path, e);
+        }
+    }
+
+    Ok(())
+}
 // Usage: your_docker.sh run <image> <command> <arg1> <arg2> ...
  fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().collect();
@@ -208,19 +230,60 @@ fn update_path() {
 
     pull(image.clone(), root_dir.to_string()).unwrap();
     
+
+    // create dev/null
+    let target_path_null = Path::new(root_dir).join("dev/null");
+    if fs::metadata(&target_path_null).is_ok() {
+        println!("/dev/null already exists at: {}", target_path_null.display());
+    } else {
+        let dev_null_mode = Mode::from_bits_truncate(0o666); // Permissions: rw-rw-rw-
+        mknod(&target_path_null, SFlag::S_IFCHR, dev_null_mode, nix::sys::stat::makedev(1, 3))
+        .expect("Failed to create /dev/null");
+    }
+    
     // file system isolation
     let tmp_dir = TempDir::new()?;
     println!("Temporary directory created at: {:?}", tmp_dir.path());
     //chroot
     println!("{}", root_dir);
-    chroot(root_dir)?;
-    //chroot(tmp_dir.path())?;
-    std::env::set_current_dir("/")?;
-    std::process::Command::new("/bin/ls")
-    .arg("/bin")
-    .output()
-    .expect("Failed to list binaries in chroot");
-    update_path();
+    chroot(root_dir).context("failed to chroot")?;
+    std::env::set_current_dir("/").context("failed to chdir")?;
+
+
+    println!("Chroot successful! Current directory: {:?}", env::current_dir());
+    // if let Err(e) = check_ls_in_chroot() {
+    //     eprintln!("Error: {}", e);
+    // }
+    // let current_dir = "/"; // The current directory
+    // println!("starting custom ls");
+    // for entry in fs::read_dir(current_dir)? {
+    //     let entry = entry?;
+    //     println!("{}", entry.file_name().to_string_lossy());
+    // }
+    // //std::env::set_var("PATH", "/bin:/usr/bin");
+    // for (key, value) in env::vars() {
+    //     println!("{} = {}", key, value);
+    // }
+
+    // let output = std::process::Command::new("/bin/ls")
+    // .arg("/")
+    // .output()
+    // .expect("Failed to list binaries in chroot");
+    // unsafe { libc::unshare(libc::CLONE_NEWPID) };
+    // if output.status.success() {
+    //     let std_out = std::str::from_utf8(&output.stdout)?;
+    //     print!("{}", std_out);
+	// let std_err = std::str::from_utf8(&output.stderr)?;
+	// eprint!("{}", std_err);
+    // } else {
+    //     let exit_code = output.status.code().unwrap_or(-1);
+	// if exit_code==-1 {
+	// 	std::process::exit(0);
+	// } else {
+	// 	println!("exit with code {}",  exit_code);
+	// 	std::process::exit(exit_code);
+	// }
+    // }
 
     
 

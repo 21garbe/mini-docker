@@ -6,6 +6,5 @@ This project aims at creating a toy docker project for third year in school
 
 ```bash
 cargo build
-sudo ./target/debug/mini-docker / / echo hi
+sudo ./target/debug/mini-docker ./sandbox alpine:latest echo hi
 ```
-
